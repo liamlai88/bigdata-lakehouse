@@ -1,0 +1,29 @@
+# Flink JobManager / TaskManager 配置
+# 单机学习场景，资源给够 Flink 跑顺
+
+jobmanager.rpc.address: jobmanager
+jobmanager.rpc.port: 6123
+jobmanager.bind-host: 0.0.0.0
+jobmanager.memory.process.size: 1024m
+
+taskmanager.bind-host: 0.0.0.0
+taskmanager.memory.process.size: 2048m
+taskmanager.numberOfTaskSlots: 4
+parallelism.default: 2
+
+# Web UI
+rest.address: 0.0.0.0
+rest.bind-address: 0.0.0.0
+rest.port: 8081
+
+# Checkpoint 配置 — 后面 exp10 容错实验需要
+state.backend: rocksdb
+state.checkpoints.dir: file:///tmp/flink-checkpoints
+execution.checkpointing.interval: 10s
+execution.checkpointing.mode: EXACTLY_ONCE
+
+# AWS / S3 credentials (供 Iceberg connector 用)
+s3.endpoint: http://minio:9000
+s3.path.style.access: true
+s3.access-key: minioadmin
+s3.secret-key: minioadmin

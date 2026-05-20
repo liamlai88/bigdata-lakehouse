@@ -1,0 +1,14 @@
+# Flink 1.20 + Iceberg + Kafka connector + S3 + Avro，一次构建后续秒启
+FROM flink:1.20-scala_2.12-java17
+
+USER root
+
+# 下载需要的 jar 包到 /opt/flink/lib
+# 这些是 Flink 启动时自动加载的，不需要在 SQL 里 ADD JAR
+RUN cd /opt/flink/lib && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.6.1/iceberg-flink-runtime-1.20-1.6.1.jar && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.6.1/iceberg-aws-bundle-1.6.1.jar && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.3.0-1.20/flink-sql-connector-kafka-3.3.0-1.20.jar && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/flink/flink-sql-avro/1.20.0/flink-sql-avro-1.20.0.jar
+
+USER flink

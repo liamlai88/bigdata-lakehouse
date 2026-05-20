@@ -11,3 +11,6 @@ pyiceberg[s3fs,pyarrow]>=0.7.0
 
 # 阶段 4 依赖：Trino python 客户端
 trino>=0.330
+
+# 阶段 5 依赖：Kafka 客户端 (给 producer 用)
+confluent-kafka>=2.5

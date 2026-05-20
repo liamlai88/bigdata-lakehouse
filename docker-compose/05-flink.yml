@@ -1,0 +1,187 @@
+# 阶段 5：完整栈 + Redpanda + Flink
+#
+# 启动:
+#   docker compose -f docker-compose/04-trino.yml down
+#   docker compose -f docker-compose/05-flink.yml up -d --build
+#
+# Web UIs:
+#   Flink:           http://localhost:8082
+#   Redpanda 控制台: http://localhost:8085
+#   Trino:           http://localhost:8080
+#   MinIO:           http://localhost:9001
+
+services:
+  # ─── 底层存储 + Catalog（跟之前阶段一致）────────────
+  minio:
+    image: minio/minio:latest
+    container_name: lakehouse-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: lakehouse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb -p local/warehouse || true;
+      "
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    container_name: lakehouse-iceberg-rest
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "8181:8181"
+    environment:
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+
+  # ─── 计算引擎: Spark + Trino（保留，多引擎共存验证）──
+  spark:
+    image: lakehouse-spark:latest
+    container_name: lakehouse-spark
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+    ports:
+      - "4040:4040"
+    volumes:
+      - ../jobs/spark:/jobs
+      - ../data:/data
+      - ./spark-conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    command: tail -f /dev/null
+    environment:
+      SPARK_LOCAL_HOSTNAME: localhost
+      PYSPARK_PYTHON: python3
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: lakehouse-trino
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./trino-conf/catalog:/etc/trino/catalog:ro
+
+  # ─── 新组件 1: Redpanda (Kafka 兼容，轻量) ─────────
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: lakehouse-redpanda
+    ports:
+      - "9092:9092"   # Kafka API (供 Mac producer + Flink)
+      - "9644:9644"   # Admin API
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health -X admin.hosts=localhost:9644 | grep -E 'Healthy:.+true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 创建 topic
+  redpanda-init:
+    image: redpandadata/redpanda:latest
+    container_name: lakehouse-redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      rpk topic create events -p 4 -r 1 -X brokers=redpanda:9092 || true;
+      rpk topic list -X brokers=redpanda:9092;
+      "
+
+  # Redpanda 控制台（看 topic / message / consumer 状态）
+  redpanda-console:
+    image: redpandadata/console:latest
+    container_name: lakehouse-redpanda-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+
+  # ─── 新组件 2: Flink (JobManager + TaskManager) ─────
+  jobmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile.flink
+    image: lakehouse-flink:latest
+    container_name: lakehouse-flink-jm
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8082:8081"   # Flink Web UI
+    command: jobmanager
+    volumes:
+      - ../jobs/flink:/jobs
+      - ./flink-conf/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+
+  taskmanager:
+    image: lakehouse-flink:latest
+    container_name: lakehouse-flink-tm
+    depends_on:
+      jobmanager:
+        condition: service_started
+    command: taskmanager
+    volumes:
+      - ../jobs/flink:/jobs
+      - ./flink-conf/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+
+volumes:
+  minio-data:
