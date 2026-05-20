@@ -1,0 +1,23 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.python-version
+
+# 数据 — 全部本地生成，不进仓库
+data/
+*.parquet
+*.csv
+*.csv.gz
+*.jsonl
+
+# 实验中间产物
+experiments/01-results.json
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# 日志
+*.log
