@@ -1,7 +1,10 @@
-# 阶段 1 依赖（最小集合）
+# 阶段 1 依赖
 pandas>=2.2
 pyarrow>=17.0
 faker>=25.0
 boto3>=1.34
 s3fs>=2024.6
 tqdm>=4.66
+
+# 阶段 2 依赖：Iceberg
+pyiceberg[s3fs,pyarrow]>=0.7.0
