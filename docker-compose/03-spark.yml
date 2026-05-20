@@ -1,0 +1,88 @@
+# 阶段 3：MinIO + Iceberg REST + Spark (with Iceberg pre-installed)
+#
+# 用法（先关掉之前的 compose）：
+#   docker compose -f docker-compose/02-iceberg.yml down
+#   docker compose -f docker-compose/03-spark.yml up -d --build
+#   # 首次构建 spark 镜像约 1-2 分钟
+#
+# 跑 spark 作业：
+#   docker compose -f docker-compose/03-spark.yml exec spark \
+#     /opt/spark/bin/spark-submit /jobs/exp05_etl_pipeline.py
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: lakehouse-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: lakehouse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb -p local/lakehouse || true;
+      mc mb -p local/warehouse || true;
+      "
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    container_name: lakehouse-iceberg-rest
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "8181:8181"
+    environment:
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+
+  spark:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    image: lakehouse-spark:latest
+    container_name: lakehouse-spark
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+    ports:
+      - "4040:4040"   # Spark UI
+    volumes:
+      - ../jobs/spark:/jobs
+      - ../data:/data
+      # 把 spark-defaults.conf 挂进去，改配置不用重 build 镜像
+      - ./spark-conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    # 容器一直跑，等我们 exec 进去 submit
+    command: tail -f /dev/null
+    environment:
+      SPARK_LOCAL_HOSTNAME: localhost
+      PYSPARK_PYTHON: python3
+      # AWS SDK v2 在 iceberg-aws-bundle 里强制要 region，环境变量最稳
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+
+volumes:
+  minio-data:

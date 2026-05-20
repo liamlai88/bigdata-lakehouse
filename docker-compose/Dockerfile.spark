@@ -1,0 +1,14 @@
+# Spark + Iceberg + AWS jars，一次构建后续秒启
+FROM apache/spark:3.5.3-scala2.12-java17-python3-ubuntu
+
+USER root
+
+# 下载 Iceberg + AWS bundle jars 到 Spark 默认 jars 目录
+RUN cd /opt/spark/jars && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.6.1/iceberg-aws-bundle-1.6.1.jar
+
+# 复制我们的 spark-defaults.conf
+COPY spark-conf/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
+
+USER spark
