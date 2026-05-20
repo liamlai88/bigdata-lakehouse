@@ -8,3 +8,6 @@ tqdm>=4.66
 
 # 阶段 2 依赖：Iceberg
 pyiceberg[s3fs,pyarrow]>=0.7.0
+
+# 阶段 4 依赖：Trino python 客户端
+trino>=0.330
