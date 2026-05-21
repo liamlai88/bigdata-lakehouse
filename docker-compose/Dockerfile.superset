@@ -1,0 +1,25 @@
+# Superset + Trino + Postgres
+#
+# 两个陷阱:
+# 1. pip 默认装到 /app/superset_home/.local (不在 sys.path) → 用 --prefix=/app/.venv
+# 2. pip 升级 SQLAlchemy 到 2.x 会破坏 Superset (eagerload 已移除)
+#    → trino[sqlalchemy] 用 --no-deps 跳过 SQLAlchemy 升级
+#    → 但要手动补 trino 的小依赖 (tzlocal 等)
+FROM apache/superset:latest
+
+USER root
+# 第一步: 装核心包不带依赖 (避免污染 SQLAlchemy)
+RUN pip install --no-cache-dir --root-user-action=ignore \
+      --prefix=/app/.venv \
+      --no-deps \
+      psycopg2-binary \
+      "trino[sqlalchemy]"
+
+# 第二步: 手动补 trino 客户端的小依赖
+# (tzlocal / pytz / requests / python-dateutil 都很轻量，不会升级 SQLAlchemy)
+RUN pip install --no-cache-dir --root-user-action=ignore \
+      --prefix=/app/.venv \
+      tzlocal \
+      pytz \
+      python-dateutil
+USER superset

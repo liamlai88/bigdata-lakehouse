@@ -1,0 +1,74 @@
+{
+  "test_queries": [
+    {
+      "id": 1,
+      "difficulty": 1,
+      "question": "过去 7 天的总 GMV 是多少？",
+      "skill": "简单聚合 + 时间过滤",
+      "reference_sql": "SELECT SUM(gmv) AS total_gmv FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY"
+    },
+    {
+      "id": 2,
+      "difficulty": 1,
+      "question": "上周哪个国家 GMV 最高？",
+      "skill": "GROUP BY + ORDER BY + LIMIT",
+      "reference_sql": "SELECT country, SUM(gmv) AS gmv FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY GROUP BY country ORDER BY gmv DESC LIMIT 1"
+    },
+    {
+      "id": 3,
+      "difficulty": 2,
+      "question": "过去 7 天每个国家每天的 pay_uv",
+      "skill": "多维 GROUP BY",
+      "reference_sql": "SELECT dt, country, SUM(pay_uv) AS pay_uv FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY GROUP BY dt, country ORDER BY dt, country"
+    },
+    {
+      "id": 4,
+      "difficulty": 2,
+      "question": "上周每个品类的 GMV 占比",
+      "skill": "占比计算 (sum/sum * 100.0)",
+      "reference_sql": "SELECT category, SUM(gmv) AS gmv, SUM(gmv) * 100.0 / (SELECT SUM(gmv) FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY) AS pct FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY GROUP BY category ORDER BY pct DESC"
+    },
+    {
+      "id": 5,
+      "difficulty": 2,
+      "question": "整体支付转化率 (pay_uv / impression_uv) 过去 7 天",
+      "skill": "派生指标",
+      "reference_sql": "SELECT SUM(pay_uv) * 100.0 / SUM(impression_uv) AS conv_pct FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY"
+    },
+    {
+      "id": 6,
+      "difficulty": 3,
+      "question": "过去 30 天里 GMV 环比上一周下降超过 10% 的国家",
+      "skill": "窗口函数 LAG 或自连接 + 同比/环比",
+      "reference_sql": "WITH weekly AS (SELECT country, date_trunc('week', dt) AS wk, SUM(gmv) AS gmv FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '30' DAY GROUP BY country, date_trunc('week', dt)), with_lag AS (SELECT country, wk, gmv, LAG(gmv) OVER (PARTITION BY country ORDER BY wk) AS prev_gmv FROM weekly) SELECT country, wk, gmv, prev_gmv, (gmv - prev_gmv) / prev_gmv AS pct_change FROM with_lag WHERE prev_gmv IS NOT NULL AND (gmv - prev_gmv) / prev_gmv < -0.1 ORDER BY pct_change"
+    },
+    {
+      "id": 7,
+      "difficulty": 3,
+      "question": "不同年龄段 (age_group) 的 ARPU (人均消费)",
+      "skill": "跨表 JOIN (dws + dim_user)",
+      "reference_sql": "SELECT u.age_group, SUM(d.pay_amount) / COUNT(DISTINCT d.user_id) AS arpu FROM iceberg.dw.dws_user_daily d JOIN iceberg.dw.dim_user u ON d.user_id = u.user_id WHERE d.dt >= current_date - INTERVAL '30' DAY GROUP BY u.age_group ORDER BY arpu DESC"
+    },
+    {
+      "id": 8,
+      "difficulty": 3,
+      "question": "各渠道带来的 GMV 占比",
+      "skill": "维度 JOIN + 占比 (channel 在 dim_user 里，要先 JOIN)",
+      "reference_sql": "SELECT u.channel, SUM(d.pay_amount) AS gmv, SUM(d.pay_amount) * 100.0 / (SELECT SUM(pay_amount) FROM iceberg.dw.dws_user_daily WHERE dt >= current_date - INTERVAL '30' DAY) AS pct FROM iceberg.dw.dws_user_daily d JOIN iceberg.dw.dim_user u ON d.user_id = u.user_id WHERE d.dt >= current_date - INTERVAL '30' DAY GROUP BY u.channel ORDER BY gmv DESC"
+    }
+  ],
+  "few_shot_examples": [
+    {
+      "question": "今天总 GMV",
+      "sql": "SELECT SUM(gmv) FROM iceberg.dw.ads_funnel_daily WHERE dt = current_date"
+    },
+    {
+      "question": "上周每个国家的 pay_uv",
+      "sql": "SELECT country, SUM(pay_uv) FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY GROUP BY country ORDER BY 2 DESC"
+    },
+    {
+      "question": "曝光到支付的总体转化率",
+      "sql": "SELECT SUM(pay_uv) * 100.0 / SUM(impression_uv) AS conv FROM iceberg.dw.ads_funnel_daily WHERE dt >= current_date - INTERVAL '7' DAY"
+    }
+  ]
+}
