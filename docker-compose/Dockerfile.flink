@@ -5,10 +5,22 @@ USER root
 
 # 下载需要的 jar 包到 /opt/flink/lib
 # 这些是 Flink 启动时自动加载的，不需要在 SQL 里 ADD JAR
+# Iceberg 1.6.x 没发布 Flink 1.20 的 runtime，必须用 1.7.1+
+# 每个 curl 单独一行，失败时报错更清楚
 RUN cd /opt/flink/lib && \
-    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.6.1/iceberg-flink-runtime-1.20-1.6.1.jar && \
-    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.6.1/iceberg-aws-bundle-1.6.1.jar && \
-    curl -fLO https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.3.0-1.20/flink-sql-connector-kafka-3.3.0-1.20.jar && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.7.1/iceberg-flink-runtime-1.20-1.7.1.jar
+RUN cd /opt/flink/lib && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.7.1/iceberg-aws-bundle-1.7.1.jar
+RUN cd /opt/flink/lib && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.3.0-1.20/flink-sql-connector-kafka-3.3.0-1.20.jar
+RUN cd /opt/flink/lib && \
     curl -fLO https://repo1.maven.org/maven2/org/apache/flink/flink-sql-avro/1.20.0/flink-sql-avro-1.20.0.jar
+
+# Iceberg 内部硬依赖 Hadoop Configuration 类 (即使不用 HDFS)
+# 用 shaded client API + runtime 避免几十个传递依赖
+RUN cd /opt/flink/lib && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.3.6/hadoop-client-api-3.3.6.jar
+RUN cd /opt/flink/lib && \
+    curl -fLO https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.3.6/hadoop-client-runtime-3.3.6.jar
 
 USER flink

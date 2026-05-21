@@ -26,7 +26,9 @@ import time
 
 from confluent_kafka import Producer
 
-BROKERS = "localhost:9092"
+BROKERS = (
+    "localhost:19092"  # Redpanda external listener (容器内的 Flink 走 redpanda:9092)
+)
 TOPIC = "events"
 
 COUNTRIES = ["US", "CN", "JP", "VN", "TH", "ID", "PH", "MY", "SG", "IN"]
@@ -80,8 +82,8 @@ def main():
         "--mode",
         choices=["ordered", "unordered"],
         default="ordered",
-        help="ordered=event_ts=now (实验 8); "
-        "unordered=10% 事件 event_ts 早 10-30s (实验 9)",
+        help="ordered=event_ts=now (exp 8); "
+        "unordered=~10pct events late by 10-30s (exp 9)",
     )
     ap.add_argument("--rate", type=int, default=100, help="events / second")
     ap.add_argument("--total", type=int, default=0, help="0 = 无限")

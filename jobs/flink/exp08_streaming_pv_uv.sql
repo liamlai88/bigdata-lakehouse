@@ -55,8 +55,8 @@ CREATE CATALOG iceberg WITH (
 USE CATALOG iceberg;
 CREATE DATABASE IF NOT EXISTS dw;
 
-DROP TABLE IF EXISTS dw.rt_pv_5min;
-CREATE TABLE dw.rt_pv_5min (
+DROP TABLE IF EXISTS dw.rt_pv_1min;
+CREATE TABLE dw.rt_pv_1min (
   window_start  TIMESTAMP(3),
   window_end    TIMESTAMP(3),
   country       STRING,
@@ -69,14 +69,14 @@ USE CATALOG default_catalog;
 -- ─────────────────────────────────────────────
 -- ③ 5 分钟滚动窗口聚合 → 入湖
 -- ─────────────────────────────────────────────
-INSERT INTO iceberg.dw.rt_pv_5min
+INSERT INTO iceberg.dw.rt_pv_1min
 SELECT
-  TUMBLE_START(ts, INTERVAL '5' MINUTE) AS window_start,
-  TUMBLE_END(ts, INTERVAL '5' MINUTE)   AS window_end,
+  TUMBLE_START(ts, INTERVAL '1' MINUTE) AS window_start,
+  TUMBLE_END(ts, INTERVAL '1' MINUTE)   AS window_end,
   country,
   COUNT(*)                              AS pv,
   COUNT(DISTINCT user_id)               AS uv
 FROM source_events
 GROUP BY
-  TUMBLE(ts, INTERVAL '5' MINUTE),
+  TUMBLE(ts, INTERVAL '1' MINUTE),
   country;

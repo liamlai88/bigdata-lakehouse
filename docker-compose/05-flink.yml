@@ -96,8 +96,11 @@ services:
     image: redpandadata/redpanda:latest
     container_name: lakehouse-redpanda
     ports:
-      - "9092:9092"   # Kafka API (供 Mac producer + Flink)
-      - "9644:9644"   # Admin API
+      - "19092:19092"  # Mac 上的 producer 用这个
+      - "9644:9644"    # Admin API
+    # 关键：双 listener
+    #   internal://redpanda:9092  → 给容器内的 Flink / redpanda-console 用
+    #   external://localhost:19092 → 给 Mac 上的 producer 用 (advertise 必须是 localhost)
     command:
       - redpanda
       - start
@@ -107,8 +110,8 @@ services:
       - --reserve-memory=0M
       - --node-id=0
       - --check=false
-      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
-      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health -X admin.hosts=localhost:9644 | grep -E 'Healthy:.+true'"]
       interval: 5s
