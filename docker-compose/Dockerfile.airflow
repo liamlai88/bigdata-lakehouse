@@ -1,0 +1,19 @@
+# Airflow + docker CLI
+# 目的：让 Airflow 容器通过挂载的 /var/run/docker.sock 调用宿主机 docker
+#       从而 `docker exec lakehouse-spark spark-submit ...`
+FROM apache/airflow:2.10.4-python3.12
+
+USER root
+# 装 docker CLI（不装 daemon，只装客户端）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl gnupg && \
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+      > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
+
+USER airflow

@@ -1,0 +1,186 @@
+# 阶段 6: 完整栈 + Airflow
+#
+# 启动:
+#   docker compose -f docker-compose/05-flink.yml down  # 关阶段 5
+#   docker compose -f docker-compose/06-airflow.yml up -d --build
+#
+# Web UIs:
+#   Airflow:     http://localhost:8090  (admin / admin)
+#   Flink:       http://localhost:8082  (本阶段不强依赖)
+#   Trino:       http://localhost:8080
+#   MinIO:       http://localhost:9001
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: lakehouse-airflow:latest
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__FERNET_KEY: "" # 学习用，生产必须设
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 10  # 学习场景快速刷新 DAG
+    AIRFLOW_UID: 50000
+  volumes:
+    - ../airflow/dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - airflow-plugins:/opt/airflow/plugins
+    # 关键：把宿主机 docker socket 挂进来，airflow 才能 docker exec
+    - /var/run/docker.sock:/var/run/docker.sock
+  user: "50000:0"
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+
+services:
+  # ─── 底层存储 + 计算（沿用之前阶段）────────────
+  minio:
+    image: minio/minio:latest
+    container_name: lakehouse-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: lakehouse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb -p local/warehouse || true;
+      "
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    container_name: lakehouse-iceberg-rest
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "8181:8181"
+    environment:
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+
+  spark:
+    image: lakehouse-spark:latest
+    container_name: lakehouse-spark
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+    ports:
+      - "4040:4040"
+    volumes:
+      - ../jobs/spark:/jobs
+      - ../data:/data
+      - ./spark-conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    command: tail -f /dev/null
+    environment:
+      SPARK_LOCAL_HOSTNAME: localhost
+      PYSPARK_PYTHON: python3
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: lakehouse-trino
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./trino-conf/catalog:/etc/trino/catalog:ro
+
+  # ─── Airflow 元数据库 ──────────────────────────
+  postgres-airflow:
+    image: postgres:16
+    container_name: lakehouse-postgres-airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  # ─── Airflow 一次性初始化（建表 + 建 admin 用户）──
+  airflow-init:
+    <<: *airflow-common
+    container_name: lakehouse-airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin --password admin \
+          --firstname Admin --lastname User \
+          --role Admin --email admin@example.com || true
+        echo "✅ Airflow init done"
+
+  # ─── Airflow Web UI ──────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: lakehouse-airflow-webserver
+    command: webserver
+    ports:
+      - "8090:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ─── Airflow Scheduler ────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: lakehouse-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test:
+        ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  minio-data:
+  postgres-airflow-data:
+  airflow-logs:
+  airflow-plugins:
